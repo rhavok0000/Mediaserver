@@ -1,0 +1,8 @@
+# Forzar LF en todos los scripts y archivos de texto
+# (necesario para que funcionen en Linux)
+* text=auto eol=lf
+
+# Archivos binarios sin conversión
+*.iso binary
+*.bin binary
+*.gz  binary

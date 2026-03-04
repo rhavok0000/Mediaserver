@@ -1,0 +1,33 @@
+name: Construir ISO Jellyfin Mediaserver
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:       # También permite dispararlo manualmente desde GitHub
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar dependencias
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xorriso isolinux wget cpio gzip
+
+      - name: Dar permisos al script
+        run: chmod +x build.sh
+
+      - name: Construir ISO
+        run: ./build.sh
+
+      - name: Subir ISO como artefacto descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: jellyfin-mediaserver-iso
+          path: jellyfin-mediaserver.iso
+          retention-days: 30     # Disponible para descargar 30 días
