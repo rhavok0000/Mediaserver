@@ -2,19 +2,13 @@
 # ==============================================================
 # Jellyfin Mediaserver ISO Builder
 # Requisitos: Ubuntu/Debian (GitHub Actions, WSL2, VM o Live USB)
-#
-# Uso:
-#   chmod +x build.sh
-#   ./build.sh
-#
-# Resultado: jellyfin-mediaserver.iso (grabar en USB con Rufus)
 # ==============================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ==============================================================
-# Colores y funciones  ← SIEMPRE primero
+# Colores y funciones  ← definir PRIMERO
 # ==============================================================
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[+]${NC} $*"; }
@@ -33,8 +27,6 @@ trap cleanup EXIT
 # ==============================================================
 BASE_URL="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd"
 
-# Obtener el nombre exacto del ISO actual desde SHA256SUMS
-# (|| true evita que pipefail falle por el pipe de head)
 ISO_FILENAME=$(wget -qO- "${BASE_URL}/SHA256SUMS" \
     | grep "netinst" | awk '{print $2}' | head -1 || true)
 
@@ -56,9 +48,9 @@ for cmd in xorriso wget cpio gzip; do
 done
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then
-    warn "Instalando paquetes faltantes: ${MISSING[*]}"
-    sudo apt-get install -y "${MISSING[@]}" isolinux syslinux-utils 2>/dev/null || \
-    sudo apt-get install -y "${MISSING[@]}" 2>/dev/null
+    warn "Instalando: ${MISSING[*]}"
+    sudo apt-get update -qq
+    sudo apt-get install -y "${MISSING[@]}" isolinux syslinux-utils
 fi
 
 info "Dependencias OK"
@@ -94,31 +86,33 @@ info "Extraída correctamente"
 title "Inyectando preseed en initrd"
 
 INITRD_GZ="$WORK_DIR/iso/install.amd/initrd.gz"
-[[ -f "$INITRD_GZ" ]] \
-    || error "No se encontró initrd.gz en la ISO extraída."
+[[ -f "$INITRD_GZ" ]] || error "No se encontró initrd.gz en la ISO extraída."
 
 info "Desempacando initrd..."
 mkdir -p "$WORK_DIR/initrd"
 cd "$WORK_DIR/initrd"
 
-# El initrd de Debian 12 es multi-parte (microcode + initrd principal
-# concatenados). cpio devuelve código 2 al encontrar la segunda parte,
-# lo que es normal. Deshabilitamos pipefail solo en este paso.
+# Desactivar set -e y pipefail: el initrd de Debian 12 es multi-parte
+# (microcode + initrd principal concatenados). cpio devuelve exit 2
+# al encontrar la segunda parte — es normal, no es un error real.
+set +e
 set +o pipefail
 gzip -d < "$INITRD_GZ" \
     | cpio --extract --make-directories \
            --no-absolute-filenames \
            --preserve-modification-time 2>/dev/null
 CPIO_RC=$?
+set -e
 set -o pipefail
 
-# Código 2 = "trailing garbage" (multi-parte normal), cualquier otro = error real
 [[ $CPIO_RC -eq 0 || $CPIO_RC -eq 2 ]] \
-    || error "Error al desempacar initrd (código: $CPIO_RC)"
+    || error "Error inesperado al desempacar initrd (código: $CPIO_RC)"
 
-# Verificar que la extracción produjo archivos
-[[ -d "$WORK_DIR/initrd/bin" || -d "$WORK_DIR/initrd/usr" ]] \
-    || error "El initrd se extrajo vacío. Estructura inesperada."
+FILE_COUNT=$(find "$WORK_DIR/initrd" -type f | wc -l)
+[[ $FILE_COUNT -gt 5 ]] \
+    || error "initrd extraído con muy pocos archivos ($FILE_COUNT). Estructura inesperada."
+
+info "initrd desempacado: $FILE_COUNT archivos"
 
 info "Copiando preseed.cfg y post-install..."
 cp "$SCRIPT_DIR/preseed.cfg"             ./preseed.cfg
@@ -126,7 +120,15 @@ cp "$SCRIPT_DIR/scripts/post-install.sh" ./jellyfin-setup.sh
 chmod +x ./jellyfin-setup.sh
 
 info "Reempacando initrd..."
+set +e
+set +o pipefail
 find . | cpio -H newc --create 2>/dev/null | gzip -9 > "$INITRD_GZ"
+REPACK_RC=$?
+set -e
+set -o pipefail
+
+[[ $REPACK_RC -eq 0 ]] || error "Error al reempacar initrd (código: $REPACK_RC)"
+
 cd "$SCRIPT_DIR"
 
 # ==============================================================
@@ -195,17 +197,23 @@ info "md5sum.txt actualizado"
 title "Construyendo ISO final"
 
 info "Leyendo parámetros de boot del original..."
-readarray -t XORRISO_ARGS < <(
-    xorriso -indev "$ISO_ORIG" -report_el_torito as_mkisofs 2>/dev/null \
-    | grep -v '^$'
-)
 
-info "Empacando ISO..."
-xorriso -as mkisofs \
-    "${XORRISO_ARGS[@]}" \
-    -V "Jellyfin-MediaServer" \
-    -o "$ISO_CUSTOM" \
-    "$WORK_DIR/iso"
+# IMPORTANTE: xorriso -report_el_torito as_mkisofs emite líneas donde
+# una sola línea puede contener DOS opciones separadas por espacio
+# (ej: "--grub2-mbr --interval:localfs:..."). readarray las pondría
+# como UN solo argumento → xorriso no las parsea.
+# Solución: unir en una sola línea y usar bash -c para interpretarlas
+# correctamente (bash respeta las comillas simples dentro de la cadena).
+XORRISO_CMD=$(xorriso -indev "$ISO_ORIG" -report_el_torito as_mkisofs 2>/dev/null \
+    | grep -v '^[[:space:]]*$' \
+    | sed "s/-V '[^']*'/-V 'Jellyfin-MediaServer'/" \
+    | tr '\n' ' ')
+
+[[ -n "$XORRISO_CMD" ]] || error "No se pudieron obtener los parámetros de boot del ISO original."
+
+info "Construyendo ISO final..."
+bash -c "xorriso -as mkisofs ${XORRISO_CMD} -o '${ISO_CUSTOM}' '${WORK_DIR}/iso'" \
+    || error "xorriso falló al construir la ISO final."
 
 # ==============================================================
 # Resultado
