@@ -100,10 +100,25 @@ INITRD_GZ="$WORK_DIR/iso/install.amd/initrd.gz"
 info "Desempacando initrd..."
 mkdir -p "$WORK_DIR/initrd"
 cd "$WORK_DIR/initrd"
+
+# El initrd de Debian 12 es multi-parte (microcode + initrd principal
+# concatenados). cpio devuelve código 2 al encontrar la segunda parte,
+# lo que es normal. Deshabilitamos pipefail solo en este paso.
+set +o pipefail
 gzip -d < "$INITRD_GZ" \
     | cpio --extract --make-directories \
            --no-absolute-filenames \
            --preserve-modification-time 2>/dev/null
+CPIO_RC=$?
+set -o pipefail
+
+# Código 2 = "trailing garbage" (multi-parte normal), cualquier otro = error real
+[[ $CPIO_RC -eq 0 || $CPIO_RC -eq 2 ]] \
+    || error "Error al desempacar initrd (código: $CPIO_RC)"
+
+# Verificar que la extracción produjo archivos
+[[ -d "$WORK_DIR/initrd/bin" || -d "$WORK_DIR/initrd/usr" ]] \
+    || error "El initrd se extrajo vacío. Estructura inesperada."
 
 info "Copiando preseed.cfg y post-install..."
 cp "$SCRIPT_DIR/preseed.cfg"             ./preseed.cfg
