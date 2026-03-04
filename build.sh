@@ -13,10 +13,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# -- ISO de base: Debian 12 oficial (incluye firmware desde bookworm) --
-DEBIAN_VER="12.9.0"
-ISO_URL="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-${DEBIAN_VER}-amd64-netinst.iso"
-ISO_ORIG="${SCRIPT_DIR}/debian-${DEBIAN_VER}-netinst.iso"
+# -- ISO de base: Debian 12 - detecta la versión actual automáticamente --
+BASE_URL="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd"
+ISO_FILENAME=$(wget -qO- "${BASE_URL}/SHA256SUMS" \
+    | grep "netinst" | awk '{print $2}' | head -1) \
+    || error "No se pudo obtener el listado de ISOs de Debian."
+ISO_URL="${BASE_URL}/${ISO_FILENAME}"
+ISO_ORIG="${SCRIPT_DIR}/${ISO_FILENAME}"
 ISO_CUSTOM="${SCRIPT_DIR}/jellyfin-mediaserver.iso"
 WORK_DIR=$(mktemp -d /tmp/iso-build.XXXXXX)
 
@@ -55,13 +58,15 @@ info "Dependencias OK"
 # ==============================================================
 title "Descargando ISO base"
 
+info "ISO a descargar: ${ISO_FILENAME}"
+
 if [[ -f "$ISO_ORIG" ]]; then
-    warn "Ya existe ${ISO_ORIG}, saltando descarga."
+    warn "Ya existe ${ISO_FILENAME}, saltando descarga."
     warn "Borra el archivo si quieres descargar de nuevo."
 else
-    info "Descargando Debian ${DEBIAN_VER} (esto puede tardar unos minutos)..."
+    info "Descargando ${ISO_FILENAME} (esto puede tardar unos minutos)..."
     wget --show-progress -O "$ISO_ORIG" "$ISO_URL" || \
-        error "No se pudo descargar la ISO. Revisa tu conexión."
+        error "No se pudo descargar la ISO desde ${ISO_URL}"
 fi
 
 # ==============================================================
