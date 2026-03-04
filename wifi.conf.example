@@ -16,8 +16,11 @@ WIFI_SSID="MiRedWiFi"
 # Contraseña del WiFi
 WIFI_PASSWORD="MiContraseña"
 
-# Tipo de seguridad:
-#   wpa   → WPA / WPA2 / WPA3  (la mayoría de los routers modernos)
-#   wep   → WEP                (routers muy antiguos, no recomendado)
+# Tipo de seguridad — usar SIEMPRE el valor del instalador Debian:
+#
+#   wpa   → WPA / WPA2-Personal / WPA3  (la mayoría de los routers)
+#           *** Aunque tu router diga "WPA2-Personal", pon "wpa" ***
+#   wep   → WEP  (routers muy antiguos, no recomendado)
 #   open  → Sin contraseña
+#
 WIFI_SECURITY="wpa"
