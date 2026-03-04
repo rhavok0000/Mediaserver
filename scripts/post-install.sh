@@ -15,7 +15,7 @@ warn() { echo -e "${YELLOW}[!] $*${NC}"; }
 # ==============================================================
 # 1. Repositorios con non-free y firmware
 # ==============================================================
-step "[1/9] Configurando repositorios..."
+step "[1/10] Configurando repositorios..."
 
 cat > /etc/apt/sources.list <<'EOF'
 deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
@@ -29,7 +29,7 @@ apt-get update -qq
 # ==============================================================
 # 2. Firmware WiFi (cubre los chips más comunes del mercado)
 # ==============================================================
-step "[2/9] Instalando drivers WiFi..."
+step "[2/10] Instalando drivers WiFi..."
 
 apt-get install -y --no-install-recommends \
     firmware-linux \
@@ -53,14 +53,14 @@ update-initramfs -u -k all
 # ==============================================================
 # 3. Instalar Jellyfin
 # ==============================================================
-step "[3/9] Instalando Jellyfin..."
+step "[3/10] Instalando Jellyfin..."
 
 curl -fsSL https://repo.jellyfin.org/install-jellyfin.sh | bash
 
 # ==============================================================
 # 4. Estructura de carpetas de medios
 # ==============================================================
-step "[4/9] Creando carpetas de medios..."
+step "[4/10] Creando carpetas de medios..."
 
 mkdir -p /media/peliculas
 mkdir -p /media/musica
@@ -80,7 +80,7 @@ usermod -aG render      jellyfin 2>/dev/null || true
 # ==============================================================
 # 5. Filebrowser - subir archivos desde el celular fácilmente
 # ==============================================================
-step "[5/9] Instalando Filebrowser (subida desde celular)..."
+step "[5/10] Instalando Filebrowser (subida desde celular)..."
 
 # Descargar e instalar el binario oficial
 curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
@@ -126,7 +126,7 @@ chown -R mediaserver:mediaserver /etc/filebrowser
 # ==============================================================
 # 6. Rclone - montar Box.net como disco local (/media/nube)
 # ==============================================================
-step "[6/9] Instalando Rclone (Box.net como disco local)..."
+step "[6/10] Instalando Rclone (Box.net como disco local)..."
 
 curl -fsSL https://rclone.org/install.sh | bash
 
@@ -250,7 +250,7 @@ fi
 # ==============================================================
 # 7. Firewall
 # ==============================================================
-step "[7/9] Configurando firewall (UFW)..."
+step "[7/10] Configurando firewall (UFW)..."
 
 ufw --force reset
 ufw default deny incoming
@@ -261,25 +261,88 @@ ufw allow 8920/tcp  comment 'Jellyfin HTTPS'
 ufw allow 8080/tcp  comment 'Filebrowser (subir desde celular)'
 ufw allow 1900/udp  comment 'DLNA/SSDP discovery'
 ufw allow 7359/udp  comment 'Jellyfin auto-discovery'
+ufw allow 41641/udp comment 'Tailscale (acceso remoto)'
 ufw --force enable
 
 # ==============================================================
-# 8. Habilitar servicios al arranque
+# 8. Tailscale - acceso remoto seguro desde cualquier lugar
 # ==============================================================
-step "[8/9] Habilitando servicios..."
+step "[8/10] Instalando Tailscale (acceso remoto)..."
+
+# Instalar Tailscale (VPN basada en WireGuard, gratis hasta 100 dispositivos)
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# Habilitar el servicio al arranque (la autenticación se hace manualmente)
+systemctl enable tailscaled
+
+# Script de activación del acceso remoto (se corre una sola vez)
+cat > /usr/local/bin/conectar-remoto <<'SCRIPT'
+#!/bin/bash
+echo ""
+echo "======================================================"
+echo "  ACTIVAR ACCESO REMOTO CON TAILSCALE"
+echo "======================================================"
+echo ""
+echo "  PASO 1: Instala Tailscale en tu celular o PC:"
+echo "    Android/iOS : busca 'Tailscale' en la tienda de apps"
+echo "    Windows/Mac : https://tailscale.com/download"
+echo ""
+echo "  PASO 2: Crea una cuenta gratis en https://tailscale.com"
+echo "          (puedes usar Google o Microsoft)"
+echo ""
+echo "  PASO 3: El servidor te mostrará un enlace."
+echo "          Ábrelo en el navegador e inicia sesión"
+echo "          con la misma cuenta de Tailscale."
+echo ""
+read -rp "  Presiona Enter para conectar el servidor..." _
+
+# Conectar a Tailscale (abre URL de autenticación)
+tailscale up
+
+# Mostrar IP asignada por Tailscale
+TS_IP=$(tailscale ip -4 2>/dev/null || echo "pendiente")
+
+echo ""
+echo "======================================================"
+echo "  SERVIDOR CONECTADO!"
+echo "======================================================"
+echo ""
+echo "  IP Tailscale del servidor: ${TS_IP}"
+echo ""
+echo "  Desde CUALQUIER lugar con Tailscale instalado:"
+echo "    Jellyfin:     http://${TS_IP}:8096"
+echo "    Filebrowser:  http://${TS_IP}:8080"
+echo ""
+echo "  Para ver tu IP Tailscale en el futuro:"
+echo "    tailscale ip"
+echo "======================================================"
+SCRIPT
+
+chmod +x /usr/local/bin/conectar-remoto
+
+# Permitir que Tailscale acceda a la interfaz de red
+if [ -f /etc/ufw/before.rules ]; then
+    ufw allow in on tailscale0 2>/dev/null || true
+fi
+
+# ==============================================================
+# 9. Habilitar servicios al arranque
+# ==============================================================
+step "[9/10] Habilitando servicios..."
 
 systemctl daemon-reload
 systemctl enable jellyfin
 systemctl enable filebrowser
 systemctl enable avahi-daemon
 systemctl enable NetworkManager
+systemctl enable tailscaled
 systemctl enable ssh
 # rclone-nube se activa manualmente con: configurar-nube
 
 # ==============================================================
-# 9. Mensaje final
+# 10. Mensaje final
 # ==============================================================
-step "[9/9] Instalación completada"
+step "[10/10] Instalación completada"
 
 IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "IP-DEL-SERVIDOR")
 
@@ -288,28 +351,29 @@ echo "======================================================"
 echo "   JELLYFIN MEDIA SERVER - LISTO"
 echo "======================================================"
 echo ""
-echo "  JELLYFIN (ver peliculas/musica en la TV):"
-echo "  http://${IP}:8096"
+echo "  RED LOCAL:"
+echo "    Jellyfin:     http://${IP}:8096"
+echo "    Filebrowser:  http://${IP}:8080"
+echo "    Usuario: admin  |  Contraseña: jellyfin123"
 echo ""
-echo "  FILEBROWSER (subir archivos desde el celular):"
-echo "  http://${IP}:8080"
-echo "  Usuario: admin  |  Contraseña: jellyfin123"
+echo "  ACCESO REMOTO (desde cualquier lugar):"
+echo "    sudo conectar-remoto   ← ejecutar una sola vez"
+echo "    Luego usa la IP de Tailscale en lugar de ${IP}"
 echo ""
-echo "  Para conectar Box.net (ejecutar una sola vez):"
-echo "  sudo configurar-nube"
+echo "  NUBE (Box.net como disco local):"
+echo "    sudo configurar-nube   ← ejecutar una sola vez"
 echo ""
-echo "  Carpetas de medios:"
+echo "  CARPETAS DE MEDIOS:"
 echo "    /media/peliculas  /media/series"
 echo "    /media/musica     /media/fotos"
-echo "    /media/nube  ← Box.net montado como disco local"
+echo "    /media/nube  ← Box.net (tras configurar)"
 echo ""
-echo "  WiFi incluido para chips:"
-echo "  Intel · Realtek · Atheros · Broadcom · Ralink · MediaTek"
-echo ""
-echo "  Compatible con:"
+echo "  TELEVISORES:"
 echo "    Samsung TV  →  busca 'Jellyfin' en la App Store"
 echo "    LG webOS    →  busca 'Jellyfin' en LG Content Store"
 echo "    DLNA        →  detectado automáticamente en la red"
+echo ""
+echo "  WiFi: Intel · Realtek · Atheros · Broadcom · Ralink · MediaTek"
 echo ""
 echo "  Usuario del sistema : mediaserver"
 echo "  Contraseña          : jellyfin123  ← ¡CAMBIALA!"
