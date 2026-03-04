@@ -23,6 +23,25 @@ cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 # ==============================================================
+# Credenciales WiFi
+# Prioridad: variables de entorno (GitHub Secrets) > wifi.conf
+# ==============================================================
+if [[ -f "$SCRIPT_DIR/wifi.conf" ]]; then
+    # shellcheck source=/dev/null
+    source "$SCRIPT_DIR/wifi.conf"
+fi
+
+WIFI_SSID="${WIFI_SSID:-}"
+WIFI_PASSWORD="${WIFI_PASSWORD:-}"
+WIFI_SECURITY="${WIFI_SECURITY:-wpa}"
+
+if [[ -z "$WIFI_SSID" || -z "$WIFI_PASSWORD" ]]; then
+    error "Faltan credenciales WiFi.\n  Local: copia wifi.conf.example a wifi.conf y edítalo.\n  GitHub Actions: configura los secretos WIFI_SSID y WIFI_PASSWORD."
+fi
+
+info "WiFi configurado: SSID='${WIFI_SSID}' / Seguridad=${WIFI_SECURITY}"
+
+# ==============================================================
 # Variables de ISO  ← DESPUÉS de definir funciones
 # ==============================================================
 BASE_URL="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd"
@@ -114,8 +133,13 @@ FILE_COUNT=$(find "$WORK_DIR/initrd" -type f | wc -l)
 
 info "initrd desempacado: $FILE_COUNT archivos"
 
-info "Copiando preseed.cfg y post-install..."
-cp "$SCRIPT_DIR/preseed.cfg"             ./preseed.cfg
+info "Copiando preseed.cfg e inyectando WiFi..."
+# Sustituir placeholders con los valores reales de wifi.conf / GitHub Secrets
+sed -e "s/__WIFI_SSID__/${WIFI_SSID}/g" \
+    -e "s/__WIFI_PASS__/${WIFI_PASSWORD}/g" \
+    -e "s/__WIFI_SECURITY__/${WIFI_SECURITY}/g" \
+    "$SCRIPT_DIR/preseed.cfg" > ./preseed.cfg
+
 cp "$SCRIPT_DIR/scripts/post-install.sh" ./jellyfin-setup.sh
 chmod +x ./jellyfin-setup.sh
 

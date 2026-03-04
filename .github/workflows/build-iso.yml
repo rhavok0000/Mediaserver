@@ -3,7 +3,7 @@ name: Construir ISO Jellyfin Mediaserver
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:       # También permite dispararlo manualmente desde GitHub
+  workflow_dispatch:
 
 jobs:
   build:
@@ -23,6 +23,10 @@ jobs:
         run: chmod +x build.sh
 
       - name: Construir ISO
+        env:
+          WIFI_SSID: ${{ secrets.WIFI_SSID }}
+          WIFI_PASSWORD: ${{ secrets.WIFI_PASSWORD }}
+          WIFI_SECURITY: ${{ secrets.WIFI_SECURITY }}
         run: ./build.sh
 
       - name: Subir ISO como artefacto descargable
@@ -30,4 +34,4 @@ jobs:
         with:
           name: jellyfin-mediaserver-iso
           path: jellyfin-mediaserver.iso
-          retention-days: 30     # Disponible para descargar 30 días
+          retention-days: 30

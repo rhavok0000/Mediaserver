@@ -1,0 +1,9 @@
+# Credenciales WiFi — NO subir al repositorio
+wifi.conf
+
+# ISOs generadas — son muy pesadas para git
+*.iso
+
+# Archivos temporales de build
+/tmp/
+debian-*-netinst.iso

@@ -1,0 +1,23 @@
+# ============================================================
+# Configuración WiFi para la instalación de Jellyfin Server
+#
+# INSTRUCCIONES:
+#   1. Copia este archivo como "wifi.conf"  (mismo directorio)
+#   2. Edita los valores con tu red WiFi
+#   3. Ejecuta ./build.sh  (o deja que GitHub Actions construya)
+#
+# IMPORTANTE: wifi.conf está en .gitignore para que tu contraseña
+#             NO se suba al repositorio.
+# ============================================================
+
+# Nombre de la red WiFi (SSID) — exactamente como aparece en el celular
+WIFI_SSID="MiRedWiFi"
+
+# Contraseña del WiFi
+WIFI_PASSWORD="MiContraseña"
+
+# Tipo de seguridad:
+#   wpa   → WPA / WPA2 / WPA3  (la mayoría de los routers modernos)
+#   wep   → WEP                (routers muy antiguos, no recomendado)
+#   open  → Sin contraseña
+WIFI_SECURITY="wpa"
