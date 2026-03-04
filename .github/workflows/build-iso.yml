@@ -22,11 +22,18 @@ jobs:
       - name: Dar permisos al script
         run: chmod +x build.sh
 
-      - name: Construir ISO
+      - name: Crear wifi.conf desde secretos de GitHub
         env:
           WIFI_SSID: ${{ secrets.WIFI_SSID }}
           WIFI_PASSWORD: ${{ secrets.WIFI_PASSWORD }}
           WIFI_SECURITY: ${{ secrets.WIFI_SECURITY }}
+        run: |
+          printf 'WIFI_SSID="%s"\nWIFI_PASSWORD="%s"\nWIFI_SECURITY="%s"\n' \
+            "$WIFI_SSID" \
+            "$WIFI_PASSWORD" \
+            "${WIFI_SECURITY:-wpa}" > wifi.conf
+
+      - name: Construir ISO
         run: ./build.sh
 
       - name: Subir ISO como artefacto descargable
