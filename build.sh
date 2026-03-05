@@ -141,6 +141,7 @@ sed -e "s/__WIFI_SSID__/${WIFI_SSID}/g" \
     "$SCRIPT_DIR/preseed.cfg" > ./preseed.cfg
 
 cp "$SCRIPT_DIR/scripts/post-install.sh" ./jellyfin-setup.sh
+sed -i 's/\r$//' ./jellyfin-setup.sh   # Eliminar CRLF si fue editado en Windows
 chmod +x ./jellyfin-setup.sh
 
 info "Reempacando initrd..."

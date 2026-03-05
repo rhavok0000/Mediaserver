@@ -5,6 +5,9 @@
 # ==============================================================
 set -euo pipefail
 
+# Asegurar que /usr/local/bin esté en el PATH (necesario en entorno in-target)
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 LOG="/var/log/jellyfin-setup.log"
 exec > >(tee -a "$LOG") 2>&1
 
