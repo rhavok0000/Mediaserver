@@ -1,12 +1,13 @@
 #!/bin/bash
 # ==============================================================
 # JELLYFIN MEDIA SERVER - Script de Instalación
-# Ejecutar en Debian 12 minimal vía SSH:
-#   sudo bash setup.sh
+# Compatible con Debian 12 (Bookworm) y Debian 13 (Trixie)
+# Ejecutar vía SSH: sudo bash setup.sh
 # ==============================================================
 
 set -euo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export DEBIAN_FRONTEND=noninteractive
 
 # ─────────────────────────────────────────────────────────────
 # Colores y helpers
@@ -22,12 +23,22 @@ ok()    { echo -e "${GREEN}    ✓ $*${NC}"; }
 
 TOTAL_STEPS=10
 
+# Detectar versión de Debian automáticamente
+CODENAME=$(. /etc/os-release 2>/dev/null && echo "${VERSION_CODENAME:-}" || echo "")
+if [[ -z "$CODENAME" ]]; then
+    CODENAME=$(lsb_release -cs 2>/dev/null || echo "bookworm")
+fi
+# trixie/sid usan "trixie" para security
+if [[ "$CODENAME" == "sid" || "$CODENAME" == "unstable" ]]; then
+    CODENAME="trixie"
+fi
+
 header() {
     clear
     echo -e "${BOLD}${CYAN}"
     echo "╔══════════════════════════════════════════════════════════╗"
     echo "║         JELLYFIN MEDIA SERVER - Instalación              ║"
-    echo "║         Debian 12 · Servidor de Medios                   ║"
+    echo "║         Debian ${CODENAME} · Servidor de Medios              ║"
     echo "╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
@@ -41,18 +52,12 @@ if [[ $EUID -ne 0 ]]; then
     error "Este script debe ejecutarse como root: sudo bash setup.sh"
 fi
 
-if ! grep -qi "bookworm\|debian.*12" /etc/os-release 2>/dev/null; then
-    warn "Advertencia: Este script fue diseñado para Debian 12 (Bookworm)."
-    warn "En otra versión puede haber errores."
-    read -rp "    ¿Continuar de todas formas? [s/N]: " resp
-    [[ "$resp" =~ ^[sS]$ ]] || exit 0
-fi
-
 LOG="/var/log/jellyfin-setup.log"
 mkdir -p "$(dirname "$LOG")"
 exec > >(tee -a "$LOG") 2>&1
 
 echo ""
+info "Sistema detectado: Debian ${CODENAME}"
 info "Iniciando instalación. Log completo en: $LOG"
 info "Hora de inicio: $(date)"
 echo ""
@@ -60,22 +65,35 @@ echo ""
 # ─────────────────────────────────────────────────────────────
 # PASO 1 — Repositorios
 # ─────────────────────────────────────────────────────────────
-step "[1/${TOTAL_STEPS}] Configurando repositorios Debian..."
+step "[1/${TOTAL_STEPS}] Configurando repositorios Debian (${CODENAME})..."
 
-cat > /etc/apt/sources.list <<'EOF'
-deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
-deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
-deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
-deb http://deb.debian.org/debian bookworm-backports main contrib non-free non-free-firmware
+# Repositorio de seguridad: bookworm usa "bookworm-security", trixie igual
+SEC_SUITE="${CODENAME}-security"
+
+cat > /etc/apt/sources.list <<EOF
+deb http://deb.debian.org/debian ${CODENAME} main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian ${CODENAME}-updates main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security ${SEC_SUITE} main contrib non-free non-free-firmware
 EOF
 
+# Backports solo si no es sid/trixie rolling
+if [[ "$CODENAME" == "bookworm" ]]; then
+    echo "deb http://deb.debian.org/debian ${CODENAME}-backports main contrib non-free non-free-firmware" \
+        >> /etc/apt/sources.list
+fi
+
 apt-get update -qq
+
+# Reparar dependencias rotas antes de instalar nada nuevo
+apt-get -f install -y 2>/dev/null || true
+apt-get install -y --fix-broken 2>/dev/null || true
+
 apt-get install -y --no-install-recommends \
     curl wget gnupg ca-certificates apt-transport-https \
     sudo ufw avahi-daemon fuse3 net-tools openssh-server \
-    2>/dev/null
+    lsb-release
 
-ok "Repositorios configurados."
+ok "Repositorios configurados para Debian ${CODENAME}."
 
 # ─────────────────────────────────────────────────────────────
 # PASO 2 — Firmware WiFi
@@ -396,7 +414,7 @@ IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "IP-DEL-SERVIDOR")
 echo ""
 echo -e "${BOLD}${CYAN}"
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║          JELLYFIN MEDIA SERVER - LISTO ✓                 ║"
+echo "║       JELLYFIN MEDIA SERVER - LISTO ✓ (${CODENAME})          ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 echo "  ── ACCESO EN RED LOCAL ──────────────────────────────────"
