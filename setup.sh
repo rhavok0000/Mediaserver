@@ -126,7 +126,22 @@ ok "Drivers WiFi instalados."
 # ─────────────────────────────────────────────────────────────
 step "[3/${TOTAL_STEPS}] Instalando Jellyfin..."
 
-curl -fsSL https://repo.jellyfin.org/install-jellyfin.sh | bash
+# Jellyfin usa repositorio APT propio — más estable que el script one-liner
+# Para Debian 13 (Trixie) usamos los paquetes de bookworm (100% compatibles)
+JELLYFIN_DIST="bookworm"
+
+# Agregar clave GPG oficial de Jellyfin
+mkdir -p /usr/share/keyrings
+curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
+    | gpg --dearmor -o /usr/share/keyrings/jellyfin.gpg
+
+# Agregar repositorio APT
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/jellyfin.gpg] \
+https://repo.jellyfin.org/debian ${JELLYFIN_DIST} main" \
+    | tee /etc/apt/sources.list.d/jellyfin.list > /dev/null
+
+apt-get update -qq
+apt-get install -y jellyfin
 
 ok "Jellyfin instalado."
 
@@ -165,26 +180,55 @@ ok "Carpetas y usuario configurados."
 # ─────────────────────────────────────────────────────────────
 step "[5/${TOTAL_STEPS}] Instalando Filebrowser (subir archivos desde el celular)..."
 
-curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
+# Descargar el binario más reciente directamente desde GitHub Releases (siempre disponible)
+FB_ARCH=$(dpkg --print-architecture)
+# Mapear arquitecturas de Debian a las que usa Filebrowser
+case "$FB_ARCH" in
+    amd64)   FB_ARCH="amd64" ;;
+    arm64)   FB_ARCH="arm64" ;;
+    armhf)   FB_ARCH="armv7" ;;
+    *)       FB_ARCH="amd64" ;;
+esac
+
+FB_URL=$(curl -fsSL "https://api.github.com/repos/filebrowser/filebrowser/releases/latest" \
+    | grep "browser_download_url" \
+    | grep "linux-${FB_ARCH}.tar.gz" \
+    | head -1 \
+    | cut -d'"' -f4)
+
+if [[ -z "$FB_URL" ]]; then
+    # Fallback: versión conocida estable
+    FB_URL="https://github.com/filebrowser/filebrowser/releases/download/v2.31.2/linux-${FB_ARCH}.tar.gz"
+fi
+
+curl -fsSL "$FB_URL" | tar -xz -C /usr/local/bin filebrowser
+chmod +x /usr/local/bin/filebrowser
 
 mkdir -p /etc/filebrowser
 
-/usr/local/bin/filebrowser config init \
-    --database /etc/filebrowser/filebrowser.db
+# Inicializar configuración con archivo JSON (compatible con todas las versiones v2.x)
+cat > /etc/filebrowser/.filebrowser.json <<'FBEOF'
+{
+  "port": 8080,
+  "baseURL": "",
+  "address": "0.0.0.0",
+  "log": "/var/log/filebrowser.log",
+  "database": "/etc/filebrowser/filebrowser.db",
+  "root": "/media"
+}
+FBEOF
 
-/usr/local/bin/filebrowser config set \
-    --database /etc/filebrowser/filebrowser.db \
-    --address 0.0.0.0 \
-    --port 8080 \
-    --root /media \
-    --log /var/log/filebrowser.log
+# Inicializar base de datos y crear usuario admin
+/usr/local/bin/filebrowser \
+    -c /etc/filebrowser/.filebrowser.json \
+    config init 2>/dev/null || true
 
-/usr/local/bin/filebrowser users add admin jellyfin123 \
-    --database /etc/filebrowser/filebrowser.db \
-    --perm.admin 2>/dev/null || \
-/usr/local/bin/filebrowser users update admin \
-    --database /etc/filebrowser/filebrowser.db \
-    --password jellyfin123 2>/dev/null || true
+/usr/local/bin/filebrowser \
+    -c /etc/filebrowser/.filebrowser.json \
+    users add admin jellyfin123 --perm.admin 2>/dev/null || \
+/usr/local/bin/filebrowser \
+    -c /etc/filebrowser/.filebrowser.json \
+    users update admin --password jellyfin123 2>/dev/null || true
 
 cat > /etc/systemd/system/filebrowser.service <<'EOF'
 [Unit]
@@ -195,7 +239,7 @@ After=network.target
 User=mediaserver
 Group=mediaserver
 ExecStart=/usr/local/bin/filebrowser \
-    --database /etc/filebrowser/filebrowser.db
+    -c /etc/filebrowser/.filebrowser.json
 Restart=on-failure
 RestartSec=5
 
