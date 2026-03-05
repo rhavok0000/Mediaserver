@@ -122,28 +122,54 @@ update-initramfs -u -k all 2>/dev/null || true
 ok "Drivers WiFi instalados."
 
 # ─────────────────────────────────────────────────────────────
-# PASO 3 — Jellyfin
+# PASO 3 — Jellyfin (via Docker — compatible con cualquier Debian)
 # ─────────────────────────────────────────────────────────────
-step "[3/${TOTAL_STEPS}] Instalando Jellyfin..."
+step "[3/${TOTAL_STEPS}] Instalando Jellyfin via Docker..."
+info "Motivo: Jellyfin nativo requiere librerías de Debian 12 no disponibles en ${CODENAME}."
+info "Docker empaqueta todas sus dependencias internamente — sin conflictos."
 
-# Jellyfin usa repositorio APT propio — más estable que el script one-liner
-# Para Debian 13 (Trixie) usamos los paquetes de bookworm (100% compatibles)
-JELLYFIN_DIST="bookworm"
+# Instalar Docker desde los repositorios de Debian
+apt-get install -y docker.io
 
-# Agregar clave GPG oficial de Jellyfin
-mkdir -p /usr/share/keyrings
-curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
-    | gpg --dearmor -o /usr/share/keyrings/jellyfin.gpg
+systemctl enable docker
+systemctl start  docker
 
-# Agregar repositorio APT
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/jellyfin.gpg] \
-https://repo.jellyfin.org/debian ${JELLYFIN_DIST} main" \
-    | tee /etc/apt/sources.list.d/jellyfin.list > /dev/null
+# Directorio de configuración de Jellyfin (fuera del contenedor = persiste entre reinicios)
+mkdir -p /etc/jellyfin /var/cache/jellyfin
+chmod 755 /etc/jellyfin /var/cache/jellyfin
 
-apt-get update -qq
-apt-get install -y jellyfin
+# Descargar imagen y arrancar contenedor Jellyfin
+# --network host  → para que DLNA/SSDP funcione en la red local (detección automática en TVs)
+docker pull jellyfin/jellyfin:latest
 
-ok "Jellyfin instalado."
+docker run -d \
+    --name jellyfin \
+    --restart unless-stopped \
+    --network host \
+    -v /etc/jellyfin:/config \
+    -v /var/cache/jellyfin:/cache \
+    -v /media:/media \
+    jellyfin/jellyfin:latest
+
+# Servicio systemd para gestionar el contenedor como cualquier otro servicio
+cat > /etc/systemd/system/jellyfin.service <<'EOF'
+[Unit]
+Description=Jellyfin Media Server (Docker)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/docker start jellyfin
+ExecStop=/usr/bin/docker stop jellyfin
+ExecReload=/usr/bin/docker restart jellyfin
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+ok "Jellyfin instalado y corriendo en Docker."
 
 # ─────────────────────────────────────────────────────────────
 # PASO 4 — Carpetas de medios y usuario
@@ -152,9 +178,12 @@ step "[4/${TOTAL_STEPS}] Creando carpetas de medios y usuario del sistema..."
 
 # Crear usuario mediaserver si no existe
 if ! id "mediaserver" &>/dev/null; then
-    useradd -m -s /bin/bash -G sudo,audio,video mediaserver
+    useradd -m -s /bin/bash -G sudo,audio,video,docker mediaserver
     echo "mediaserver:jellyfin123" | chpasswd
     info "Usuario 'mediaserver' creado. Contraseña: jellyfin123 (¡cámbiala!)"
+else
+    # Asegurar que el usuario existente pueda usar Docker
+    usermod -aG docker mediaserver 2>/dev/null || true
 fi
 
 # Carpetas de medios
@@ -164,14 +193,11 @@ mkdir -p /media/peliculas \
          /media/fotos \
          /media/nube
 
-# Permisos
+# Permisos — accesibles por el usuario y por el contenedor Docker
 chown -R mediaserver:mediaserver /media
 chmod -R 775 /media
-
-# Jellyfin necesita acceso a las carpetas
-usermod -aG mediaserver jellyfin 2>/dev/null || true
-usermod -aG video       jellyfin 2>/dev/null || true
-usermod -aG render      jellyfin 2>/dev/null || true
+# El contenedor Jellyfin corre como uid 1000 — asegurar que pueda leer
+chmod o+rx /media /media/peliculas /media/series /media/musica /media/fotos /media/nube
 
 ok "Carpetas y usuario configurados."
 
@@ -436,15 +462,17 @@ ok "Tailscale instalado. Ejecuta 'sudo conectar-remoto' para activar el acceso r
 step "[9/${TOTAL_STEPS}] Activando servicios al arranque..."
 
 systemctl daemon-reload
-systemctl enable jellyfin
+systemctl enable jellyfin       # wrapper Docker
 systemctl enable filebrowser
 systemctl enable avahi-daemon
 systemctl enable NetworkManager 2>/dev/null || true
 systemctl enable ssh
 
-systemctl restart jellyfin    2>/dev/null || true
-systemctl restart filebrowser 2>/dev/null || true
-systemctl restart avahi-daemon 2>/dev/null || true
+# Jellyfin ya corre dentro de Docker (arrancó en el paso 3)
+# Solo reiniciamos los demás servicios
+docker restart jellyfin         2>/dev/null || true
+systemctl restart filebrowser   2>/dev/null || true
+systemctl restart avahi-daemon  2>/dev/null || true
 
 ok "Servicios habilitados y arrancados."
 
